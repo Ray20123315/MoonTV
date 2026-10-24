@@ -1,4 +1,4 @@
-name: Verify LunaTV Cloudflare preview HTTP
+name: Verify production LunaTV HTTPS and D1 authentication
 
 on:
   push:
@@ -11,19 +11,28 @@ permissions:
   contents: read
 
 jobs:
-  smoke:
+  production-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 7
     steps:
-      - name: Verify deployed LunaTV preview responds
+      - name: Verify production domains and D1 login read path
         shell: bash
         run: |
           set -euo pipefail
-          ROOT="https://f20bce74.moontv-6en.pages.dev"
-          for path in "/" "/login"; do
-            code="$(curl --location --silent --show-error --max-time 30 --retry 2 --retry-delay 3 -o /tmp/page.html -w '%{http_code}' "$ROOT$path")"
-            echo "CHECK $path HTTP=$code"
-            test "$code" = "200"
-            grep -Eqi '(MoonTV|LunaTV|login|登录|登入)' /tmp/page.html
+          for ROOT in "https://moontv.ray2026.dpdns.org" "https://moontv.ray2025mail.dpdns.org" "https://moontv-6en.pages.dev"; do
+            echo "Verifying $ROOT"
+            for path in "/" "/login"; do
+              status="$(curl --location --silent --show-error --max-time 30 --retry 2 --retry-delay 2 -o /tmp/page.html -w '%{http_code}' "$ROOT$path")"
+              test "$status" = "200"
+              grep -Eqi '(MoonTV|LunaTV|login|登录|登入)' /tmp/page.html
+              echo "HTTP_200 $ROOT$path"
+            done
+            code="$(curl --silent --show-error --max-time 30 --retry 2 --retry-delay 2 \
+              -o /tmp/login.json -w '%{http_code}' \
+              -X POST -H 'Content-Type: application/json' \
+              --data '{"username":"__libretv_healthcheck_no_real_user_20261024__","password":"invalid-readonly-check"}' \
+              "$ROOT/api/login")"
+            echo "AUTH_CHECK $ROOT returned $code"
+            test "$code" = "401"
+            echo "PRODUCTION_HTTP_PASS: $ROOT homepage 200, login 200, D1 username lookup rejected nonexistent account 401"
           done
-          echo "STAGING_HTTP_PASS: Node.js compatible Pages preview home and login"
