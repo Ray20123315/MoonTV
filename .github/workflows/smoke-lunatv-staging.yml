@@ -1,0 +1,29 @@
+name: Verify LunaTV Cloudflare preview HTTP
+
+on:
+  push:
+    branches:
+      - staging/lunatv-20261024
+    paths:
+      - .github/workflows/smoke-lunatv-staging.yml
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Verify deployed LunaTV preview responds
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://1970d8c2.moontv-6en.pages.dev"
+          for path in "/" "/login"; do
+            status="$(curl --location --silent --show-error --max-time 45 --retry 3 --retry-delay 3 -o /tmp/page.html -w '%{http_code}' "$ROOT$path")"
+            echo "CHECK $path HTTP=$status"
+            test "$status" = "200"
+            grep -Eqi '(MoonTV|LunaTV|login|登录|登入)' /tmp/page.html
+          done
+          echo "STAGING_HTTP_PASS: Cloudflare Pages LunaTV home/login responses 200"
