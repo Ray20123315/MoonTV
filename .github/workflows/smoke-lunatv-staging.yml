@@ -22,7 +22,7 @@ jobs:
           for ROOT in "https://moontv.ray2026.dpdns.org" "https://moontv.ray2025mail.dpdns.org" "https://moontv-6en.pages.dev"; do
             echo "DOMAIN=$ROOT"
             for route in "/" "/login" "/admin" "/api/server-config" "/api/admin/config"; do
-              code="$(curl --silent --show-error --max-time 25 --retry 1 --retry-delay 2 -D /tmp/headers.txt -o /tmp/page.txt -w '%{http_code}' "$ROOT$route")"
+              code="$(curl --location --silent --show-error --max-time 25 --retry 1 --retry-delay 2 -D /tmp/headers.txt -o /tmp/page.txt -w '%{http_code}' "$ROOT$route")"
               echo "GET $route STATUS $code BYTES $(wc -c </tmp/page.txt)"
               if [ "$route" = "/" ] || [ "$route" = "/login" ]; then
                 test "$code" = "200"
