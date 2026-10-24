@@ -1,4 +1,4 @@
-name: Verify production LunaTV HTTPS and D1 authentication
+name: Verify MoonTV owner and user management rollback
 
 on:
   push:
@@ -11,28 +11,32 @@ permissions:
   contents: read
 
 jobs:
-  production-smoke:
+  verify-old-production:
     runs-on: ubuntu-latest
-    timeout-minutes: 7
+    timeout-minutes: 6
     steps:
-      - name: Verify production domains and D1 login read path
+      - name: Check MoonTV original production routes and D1 configuration
         shell: bash
         run: |
           set -euo pipefail
           for ROOT in "https://moontv.ray2026.dpdns.org" "https://moontv.ray2025mail.dpdns.org" "https://moontv-6en.pages.dev"; do
-            echo "Verifying $ROOT"
-            for path in "/" "/login"; do
-              status="$(curl --location --silent --show-error --max-time 30 --retry 2 --retry-delay 2 -o /tmp/page.html -w '%{http_code}' "$ROOT$path")"
-              test "$status" = "200"
-              grep -Eqi '(MoonTV|LunaTV|login|登录|登入)' /tmp/page.html
-              echo "HTTP_200 $ROOT$path"
+            echo "DOMAIN=$ROOT"
+            for route in "/" "/login" "/admin" "/api/server-config" "/api/admin/config"; do
+              code="$(curl --silent --show-error --max-time 25 --retry 1 --retry-delay 2 -D /tmp/headers.txt -o /tmp/page.txt -w '%{http_code}' "$ROOT$route")"
+              echo "GET $route STATUS $code BYTES $(wc -c </tmp/page.txt)"
+              if [ "$route" = "/" ] || [ "$route" = "/login" ]; then
+                test "$code" = "200"
+              fi
+              if [ "$route" = "/api/server-config" ]; then
+                test "$code" = "200"
+                cat /tmp/page.txt | jq -e '.StorageType == "d1"'
+              fi
+              if [ "$route" = "/api/admin/config" ]; then
+                test "$code" = "401"
+              fi
+              if [ "$route" = "/admin" ]; then
+                case "$code" in 200|302|303|307|308|401|403) : ;; *) exit 1 ;; esac
+              fi
             done
-            code="$(curl --silent --show-error --max-time 30 --retry 2 --retry-delay 2 \
-              -o /tmp/login.json -w '%{http_code}' \
-              -X POST -H 'Content-Type: application/json' \
-              --data '{"username":"__libretv_healthcheck_no_real_user_20261024__","password":"invalid-readonly-check"}' \
-              "$ROOT/api/login")"
-            echo "AUTH_CHECK $ROOT returned $code"
-            test "$code" = "401"
-            echo "PRODUCTION_HTTP_PASS: $ROOT homepage 200, login 200, D1 username lookup rejected nonexistent account 401"
+            echo "ROLLBACK_HTTP_PASS: $ROOT"
           done
