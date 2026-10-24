@@ -81,6 +81,15 @@ jobs:
           if "export const runtime = 'edge';" not in layout:
               layout=layout.replace("export const dynamic = 'force-dynamic';", "export const runtime = 'edge';" + chr(10) + "export const dynamic = 'force-dynamic';")
               root_layout.write_text(layout,encoding='utf-8')
+          # Next-on-Pages generates a separate /_not-found route; declare it Edge explicitly.
+          not_found=root/'src/app/not-found.tsx'
+          not_found.write_text(
+              "export const runtime = 'edge';" + chr(10) +
+              "export default function NotFound() {" + chr(10) +
+              "  return <main style={{padding: 32}}>404 - Page not found</main>;" + chr(10) +
+              "}" + chr(10),
+              encoding='utf-8'
+          )
           # Disable obsolete fork-sync automation targeting another project.
           (root/'.github/workflows/sync.yml').unlink(missing_ok=True)
           (root/'.github/workflows/nomore-spam.yml').unlink(missing_ok=True)
