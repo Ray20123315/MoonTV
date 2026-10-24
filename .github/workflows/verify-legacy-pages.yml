@@ -1,0 +1,32 @@
+name: Verify restored MoonTV Pages build
+
+on:
+  push:
+    branches:
+      - fix/moontv-legacy-pages-20261024
+    paths:
+      - package.json
+      - .github/workflows/verify-legacy-pages.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.14.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Verify restored Pages build
+        env:
+          NEXT_PUBLIC_STORAGE_TYPE: d1
+          USERNAME: Admin
+        run: pnpm run pages:build
