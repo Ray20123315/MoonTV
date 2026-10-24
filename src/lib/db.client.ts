@@ -15,6 +15,7 @@
  */
 
 import { getAuthInfoFromBrowserCookie } from './auth';
+// TODO: 考虑将 getCurrentUsername 改为异步，优先使用 fetchAuthInfo()（支持 httpOnly cookie）
 import { SkipConfig } from './types';
 
 // 全局错误触发函数
@@ -51,6 +52,7 @@ export interface Favorite {
   total_episodes: number;
   save_time: number;
   search_title?: string;
+  origin?: 'vod' | 'live';
 }
 
 // ---- 缓存数据结构 ----
@@ -85,7 +87,6 @@ const STORAGE_TYPE = (() => {
     (process.env.STORAGE_TYPE as
       | 'localstorage'
       | 'redis'
-      | 'd1'
       | 'upstash'
       | undefined) ||
     'localstorage';
@@ -145,11 +146,61 @@ class HybridCacheManager {
     if (typeof window === 'undefined') return;
 
     try {
+      // 检查缓存大小，超过15MB时清理旧数据
+      const cacheSize = JSON.stringify(cache).length;
+      if (cacheSize > 15 * 1024 * 1024) {
+        console.warn('缓存过大，清理旧数据');
+        this.cleanOldCache(cache);
+      }
+
       const cacheKey = this.getUserCacheKey(username);
       localStorage.setItem(cacheKey, JSON.stringify(cache));
     } catch (error) {
       console.warn('保存用户缓存失败:', error);
+      // 存储空间不足时清理缓存后重试
+      if (
+        error instanceof DOMException &&
+        error.name === 'QuotaExceededError'
+      ) {
+        this.clearAllCache();
+        try {
+          const cacheKey = this.getUserCacheKey(username);
+          localStorage.setItem(cacheKey, JSON.stringify(cache));
+        } catch (retryError) {
+          console.error('重试保存缓存仍然失败:', retryError);
+        }
+      }
     }
+  }
+
+  /**
+   * 清理过期缓存数据
+   */
+  private cleanOldCache(cache: UserCacheStore): void {
+    const now = Date.now();
+    const maxAge = 60 * 24 * 60 * 60 * 1000; // 两个月
+
+    // 清理过期的播放记录缓存
+    if (cache.playRecords && now - cache.playRecords.timestamp > maxAge) {
+      delete cache.playRecords;
+    }
+
+    // 清理过期的收藏缓存
+    if (cache.favorites && now - cache.favorites.timestamp > maxAge) {
+      delete cache.favorites;
+    }
+  }
+
+  /**
+   * 清理所有缓存
+   */
+  private clearAllCache(): void {
+    const keys = Object.keys(localStorage);
+    keys.forEach((key) => {
+      if (key.startsWith('moontv_cache_')) {
+        localStorage.removeItem(key);
+      }
+    });
   }
 
   /**
@@ -449,7 +500,7 @@ export function generateStorageKey(source: string, id: string): string {
 // ---- API ----
 /**
  * 读取全部播放记录。
- * D1 存储模式下使用混合缓存策略：优先返回缓存数据，后台异步同步最新数据。
+ * 非本地存储模式下使用混合缓存策略：优先返回缓存数据，后台异步同步最新数据。
  * 在服务端渲染阶段 (window === undefined) 时返回空对象，避免报错。
  */
 export async function getAllPlayRecords(): Promise<Record<string, PlayRecord>> {
@@ -458,7 +509,7 @@ export async function getAllPlayRecords(): Promise<Record<string, PlayRecord>> {
     return {};
   }
 
-  // 数据库存储模式：使用混合缓存策略（包括 redis、d1、upstash）
+  // 数据库存储模式：使用混合缓存策略（包括 redis 和 upstash）
   if (STORAGE_TYPE !== 'localstorage') {
     // 优先从缓存获取数据
     const cachedData = cacheManager.getCachedPlayRecords();
@@ -523,7 +574,7 @@ export async function savePlayRecord(
 ): Promise<void> {
   const key = generateStorageKey(source, id);
 
-  // 数据库存储模式：乐观更新策略（包括 redis、d1、upstash）
+  // 数据库存储模式：乐观更新策略（包括 redis 和 upstash）
   if (STORAGE_TYPE !== 'localstorage') {
     // 立即更新缓存
     const cachedRecords = cacheManager.getCachedPlayRecords() || {};
@@ -586,7 +637,7 @@ export async function deletePlayRecord(
 ): Promise<void> {
   const key = generateStorageKey(source, id);
 
-  // 数据库存储模式：乐观更新策略（包括 redis、d1、upstash）
+  // 数据库存储模式：乐观更新策略（包括 redis 和 upstash）
   if (STORAGE_TYPE !== 'localstorage') {
     // 立即更新缓存
     const cachedRecords = cacheManager.getCachedPlayRecords() || {};
@@ -647,7 +698,7 @@ export async function getSearchHistory(): Promise<string[]> {
     return [];
   }
 
-  // 数据库存储模式：使用混合缓存策略（包括 redis、d1、upstash）
+  // 数据库存储模式：使用混合缓存策略（包括 redis 和 upstash）
   if (STORAGE_TYPE !== 'localstorage') {
     // 优先从缓存获取数据
     const cachedData = cacheManager.getCachedSearchHistory();
@@ -709,7 +760,7 @@ export async function addSearchHistory(keyword: string): Promise<void> {
   const trimmed = keyword.trim();
   if (!trimmed) return;
 
-  // 数据库存储模式：乐观更新策略（包括 redis、d1、upstash）
+  // 数据库存储模式：乐观更新策略（包括 redis 和 upstash）
   if (STORAGE_TYPE !== 'localstorage') {
     // 立即更新缓存
     const cachedHistory = cacheManager.getCachedSearchHistory() || [];
@@ -769,7 +820,7 @@ export async function addSearchHistory(keyword: string): Promise<void> {
  * 数据库存储模式下使用乐观更新：先更新缓存，再异步同步到数据库。
  */
 export async function clearSearchHistory(): Promise<void> {
-  // 数据库存储模式：乐观更新策略（包括 redis、d1、upstash）
+  // 数据库存储模式：乐观更新策略（包括 redis 和 upstash）
   if (STORAGE_TYPE !== 'localstorage') {
     // 立即更新缓存
     cacheManager.cacheSearchHistory([]);
@@ -810,7 +861,7 @@ export async function deleteSearchHistory(keyword: string): Promise<void> {
   const trimmed = keyword.trim();
   if (!trimmed) return;
 
-  // 数据库存储模式：乐观更新策略（包括 redis、d1、upstash）
+  // 数据库存储模式：乐观更新策略（包括 redis 和 upstash）
   if (STORAGE_TYPE !== 'localstorage') {
     // 立即更新缓存
     const cachedHistory = cacheManager.getCachedSearchHistory() || [];
@@ -868,7 +919,7 @@ export async function getAllFavorites(): Promise<Record<string, Favorite>> {
     return {};
   }
 
-  // 数据库存储模式：使用混合缓存策略（包括 redis、d1、upstash）
+  // 数据库存储模式：使用混合缓存策略（包括 redis 和 upstash）
   if (STORAGE_TYPE !== 'localstorage') {
     // 优先从缓存获取数据
     const cachedData = cacheManager.getCachedFavorites();
@@ -933,7 +984,7 @@ export async function saveFavorite(
 ): Promise<void> {
   const key = generateStorageKey(source, id);
 
-  // 数据库存储模式：乐观更新策略（包括 redis、d1、upstash）
+  // 数据库存储模式：乐观更新策略（包括 redis 和 upstash）
   if (STORAGE_TYPE !== 'localstorage') {
     // 立即更新缓存
     const cachedFavorites = cacheManager.getCachedFavorites() || {};
@@ -996,7 +1047,7 @@ export async function deleteFavorite(
 ): Promise<void> {
   const key = generateStorageKey(source, id);
 
-  // 数据库存储模式：乐观更新策略（包括 redis、d1、upstash）
+  // 数据库存储模式：乐观更新策略（包括 redis 和 upstash）
   if (STORAGE_TYPE !== 'localstorage') {
     // 立即更新缓存
     const cachedFavorites = cacheManager.getCachedFavorites() || {};
@@ -1055,7 +1106,7 @@ export async function isFavorited(
 ): Promise<boolean> {
   const key = generateStorageKey(source, id);
 
-  // 数据库存储模式：使用混合缓存策略（包括 redis、d1、upstash）
+  // 数据库存储模式：使用混合缓存策略（包括 redis 和 upstash）
   if (STORAGE_TYPE !== 'localstorage') {
     const cachedFavorites = cacheManager.getCachedFavorites();
 
@@ -1106,7 +1157,7 @@ export async function isFavorited(
  * 数据库存储模式下使用乐观更新：先更新缓存，再异步同步到数据库。
  */
 export async function clearAllPlayRecords(): Promise<void> {
-  // 数据库存储模式：乐观更新策略（包括 redis、d1、upstash）
+  // 数据库存储模式：乐观更新策略（包括 redis 和 upstash）
   if (STORAGE_TYPE !== 'localstorage') {
     // 立即更新缓存
     cacheManager.cachePlayRecords({});
@@ -1147,7 +1198,7 @@ export async function clearAllPlayRecords(): Promise<void> {
  * 数据库存储模式下使用乐观更新：先更新缓存，再异步同步到数据库。
  */
 export async function clearAllFavorites(): Promise<void> {
-  // 数据库存储模式：乐观更新策略（包括 redis、d1、upstash）
+  // 数据库存储模式：乐观更新策略（包括 redis 和 upstash）
   if (STORAGE_TYPE !== 'localstorage') {
     // 立即更新缓存
     cacheManager.cacheFavorites({});
@@ -1308,7 +1359,7 @@ export function subscribeToDataUpdates<T>(
   callback: (data: T) => void
 ): () => void {
   if (typeof window === 'undefined') {
-    return () => {};
+    return () => { };
   }
 
   const handleUpdate = (event: CustomEvent) => {
@@ -1364,7 +1415,7 @@ export async function getSkipConfig(
 
   const key = generateStorageKey(source, id);
 
-  // 数据库存储模式：使用混合缓存策略（包括 redis、d1、upstash）
+  // 数据库存储模式：使用混合缓存策略（包括 redis 和 upstash）
   if (STORAGE_TYPE !== 'localstorage') {
     // 优先从缓存获取数据
     const cachedData = cacheManager.getCachedSkipConfigs();
@@ -1429,7 +1480,7 @@ export async function saveSkipConfig(
 ): Promise<void> {
   const key = generateStorageKey(source, id);
 
-  // 数据库存储模式：乐观更新策略（包括 redis、d1、upstash）
+  // 数据库存储模式：乐观更新策略（包括 redis 和 upstash）
   if (STORAGE_TYPE !== 'localstorage') {
     // 立即更新缓存
     const cachedConfigs = cacheManager.getCachedSkipConfigs() || {};
@@ -1492,7 +1543,7 @@ export async function getAllSkipConfigs(): Promise<Record<string, SkipConfig>> {
     return {};
   }
 
-  // 数据库存储模式：使用混合缓存策略（包括 redis、d1、upstash）
+  // 数据库存储模式：使用混合缓存策略（包括 redis 和 upstash）
   if (STORAGE_TYPE !== 'localstorage') {
     // 优先从缓存获取数据
     const cachedData = cacheManager.getCachedSkipConfigs();
@@ -1556,7 +1607,7 @@ export async function deleteSkipConfig(
 ): Promise<void> {
   const key = generateStorageKey(source, id);
 
-  // 数据库存储模式：乐观更新策略（包括 redis、d1、upstash）
+  // 数据库存储模式：乐观更新策略（包括 redis 和 upstash）
   if (STORAGE_TYPE !== 'localstorage') {
     // 立即更新缓存
     const cachedConfigs = cacheManager.getCachedSkipConfigs() || {};

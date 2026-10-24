@@ -1,11 +1,10 @@
-/* eslint-disable @typescript-eslint/no-explicit-any,no-console */
+﻿/* eslint-disable @typescript-eslint/no-explicit-any,no-console */
 
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
-import { getConfig } from '@/lib/config';
-import { getStorage } from '@/lib/db';
-import { IStorage } from '@/lib/types';
+import { getConfig, saveConfig } from '@/lib/config';
+import { db } from '@/lib/db';
 
 export const runtime = 'edge';
 
@@ -22,14 +21,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         error: '不支持本地存储进行管理员配置',
-      },
-      { status: 400 }
-    );
-  }
-  if (storageType === 'd1' || storageType === 'upstash') {
-    return NextResponse.json(
-      {
-        error: 'D1 和 Upstash 实例请通过配置文件调整',
       },
       { status: 400 }
     );
@@ -53,7 +44,6 @@ export async function POST(request: NextRequest) {
 
     // 获取配置与存储
     const adminConfig = await getConfig();
-    const storage: IStorage | null = getStorage();
 
     // 权限与身份校验
     if (username !== process.env.USERNAME) {
@@ -184,9 +174,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 持久化到存储
-    if (storage && typeof (storage as any).setAdminConfig === 'function') {
-      await (storage as any).setAdminConfig(adminConfig);
-    }
+    await saveConfig(adminConfig);
 
     return NextResponse.json(
       { ok: true },
@@ -201,7 +189,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         error: '分类管理操作失败',
-        details: (error as Error).message,
       },
       { status: 500 }
     );
