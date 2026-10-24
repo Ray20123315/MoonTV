@@ -79,9 +79,7 @@ jobs:
           root_layout=root/'src/app/layout.tsx'
           layout=root_layout.read_text(encoding='utf-8')
           if "export const runtime = 'edge';" not in layout:
-              layout=layout.replace("export const dynamic = 'force-dynamic';", "export const runtime = 'edge';\\nexport const dynamic = 'force-dynamic';")
-              # Replace literal escape inserted by the Python source string.
-              layout=layout.replace(";\\nexport const dynamic", ";\\nexport const dynamic")
+              layout=layout.replace("export const dynamic = 'force-dynamic';", "export const runtime = 'edge';" + chr(10) + "export const dynamic = 'force-dynamic';")
               root_layout.write_text(layout,encoding='utf-8')
           # Disable obsolete fork-sync automation targeting another project.
           (root/'.github/workflows/sync.yml').unlink(missing_ok=True)
