@@ -19,14 +19,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ROOT="https://1970d8c2.moontv-6en.pages.dev"
-          for path in "/" "/login" "/favicon.ico" "/api/server-config"; do
-            echo "CHECK_URL=$ROOT$path"
-            curl --location --silent --show-error --max-time 30 --retry 2 --retry-delay 2 \
-              -D /tmp/headers.txt -o /tmp/body.txt -w 'HTTP=%{http_code} TOTAL=%{time_total}\\n' "$ROOT$path" || :
-            grep -Ei '^(HTTP/|server:|cf-ray:|content-type:|location:)' /tmp/headers.txt || :
-            echo "body bytes: $(wc -c </tmp/body.txt)"
-            head -c 450 /tmp/body.txt | tr '\\n' ' ' || :
-            echo
+          ROOT="https://f20bce74.moontv-6en.pages.dev"
+          for path in "/" "/login"; do
+            code="$(curl --location --silent --show-error --max-time 30 --retry 2 --retry-delay 3 -o /tmp/page.html -w '%{http_code}' "$ROOT$path")"
+            echo "CHECK $path HTTP=$code"
+            test "$code" = "200"
+            grep -Eqi '(MoonTV|LunaTV|login|登录|登入)' /tmp/page.html
           done
-          echo "STAGING_DIAGNOSTICS_DONE"
+          echo "STAGING_HTTP_PASS: Node.js compatible Pages preview home and login"
