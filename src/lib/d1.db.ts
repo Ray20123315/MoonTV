@@ -2,7 +2,6 @@
 
 import { AdminConfig } from './admin.types';
 import { Favorite, IStorage, PlayRecord, SkipConfig } from './types';
-import { hashPassword, isHashed, verifyPassword } from './password';
 
 // 搜索历史最大条数
 const SEARCH_HISTORY_LIMIT = 20;
@@ -43,7 +42,6 @@ function getD1Database(): D1Database {
   return (process.env as any).DB as D1Database;
 }
 
-// D1 存储实现
 export class D1Storage implements IStorage {
   private db: D1Database | null = null;
 
@@ -54,8 +52,11 @@ export class D1Storage implements IStorage {
     return this.db;
   }
 
-  // ---------- 播放记录 ----------
-  async getPlayRecord(userName: string, key: string): Promise<PlayRecord | null> {
+  // 播放记录相关
+  async getPlayRecord(
+    userName: string,
+    key: string
+  ): Promise<PlayRecord | null> {
     try {
       const db = await this.getDatabase();
       const result = await db
@@ -83,14 +84,20 @@ export class D1Storage implements IStorage {
     }
   }
 
-  async setPlayRecord(userName: string, key: string, record: PlayRecord): Promise<void> {
+  async setPlayRecord(
+    userName: string,
+    key: string,
+    record: PlayRecord
+  ): Promise<void> {
     try {
       const db = await this.getDatabase();
       await db
         .prepare(
-          `INSERT OR REPLACE INTO play_records 
-           (username, key, title, source_name, cover, year, index_episode, total_episodes, play_time, total_time, save_time, search_title)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `
+          INSERT OR REPLACE INTO play_records 
+          (username, key, title, source_name, cover, year, index_episode, total_episodes, play_time, total_time, save_time, search_title)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `
         )
         .bind(
           userName,
@@ -113,15 +120,20 @@ export class D1Storage implements IStorage {
     }
   }
 
-  async getAllPlayRecords(userName: string): Promise<Record<string, PlayRecord>> {
+  async getAllPlayRecords(
+    userName: string
+  ): Promise<Record<string, PlayRecord>> {
     try {
       const db = await this.getDatabase();
       const result = await db
-        .prepare('SELECT * FROM play_records WHERE username = ? ORDER BY save_time DESC')
+        .prepare(
+          'SELECT * FROM play_records WHERE username = ? ORDER BY save_time DESC'
+        )
         .bind(userName)
         .all<any>();
 
       const records: Record<string, PlayRecord> = {};
+
       result.results.forEach((row: any) => {
         records[row.key] = {
           title: row.title,
@@ -157,20 +169,7 @@ export class D1Storage implements IStorage {
     }
   }
 
-  async deleteAllPlayRecords(userName: string): Promise<void> {
-    try {
-      const db = await this.getDatabase();
-      await db
-        .prepare('DELETE FROM play_records WHERE username = ?')
-        .bind(userName)
-        .run();
-    } catch (err) {
-      console.error('Failed to delete all play records:', err);
-      throw err;
-    }
-  }
-
-  // ---------- 收藏 ----------
+  // 收藏相关
   async getFavorite(userName: string, key: string): Promise<Favorite | null> {
     try {
       const db = await this.getDatabase();
@@ -196,14 +195,20 @@ export class D1Storage implements IStorage {
     }
   }
 
-  async setFavorite(userName: string, key: string, favorite: Favorite): Promise<void> {
+  async setFavorite(
+    userName: string,
+    key: string,
+    favorite: Favorite
+  ): Promise<void> {
     try {
       const db = await this.getDatabase();
       await db
         .prepare(
-          `INSERT OR REPLACE INTO favorites 
-           (username, key, title, source_name, cover, year, total_episodes, save_time)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+          `
+          INSERT OR REPLACE INTO favorites 
+          (username, key, title, source_name, cover, year, total_episodes, save_time)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `
         )
         .bind(
           userName,
@@ -226,11 +231,14 @@ export class D1Storage implements IStorage {
     try {
       const db = await this.getDatabase();
       const result = await db
-        .prepare('SELECT * FROM favorites WHERE username = ? ORDER BY save_time DESC')
+        .prepare(
+          'SELECT * FROM favorites WHERE username = ? ORDER BY save_time DESC'
+        )
         .bind(userName)
         .all<any>();
 
       const favorites: Record<string, Favorite> = {};
+
       result.results.forEach((row: any) => {
         favorites[row.key] = {
           title: row.title,
@@ -263,27 +271,13 @@ export class D1Storage implements IStorage {
     }
   }
 
-  async deleteAllFavorites(userName: string): Promise<void> {
-    try {
-      const db = await this.getDatabase();
-      await db
-        .prepare('DELETE FROM favorites WHERE username = ?')
-        .bind(userName)
-        .run();
-    } catch (err) {
-      console.error('Failed to delete all favorites:', err);
-      throw err;
-    }
-  }
-
-  // ---------- 用户 ----------
+  // 用户相关
   async registerUser(userName: string, password: string): Promise<void> {
     try {
       const db = await this.getDatabase();
-      const hashed = await hashPassword(password);
       await db
         .prepare('INSERT INTO users (username, password) VALUES (?, ?)')
-        .bind(userName, hashed)
+        .bind(userName, password)
         .run();
     } catch (err) {
       console.error('Failed to register user:', err);
@@ -299,20 +293,7 @@ export class D1Storage implements IStorage {
         .bind(userName)
         .first<{ password: string }>();
 
-      if (!result) return false;
-
-      const ok = await verifyPassword(password, result.password);
-      
-      // 平滑迁移：明文密码自动升级为哈希
-      if (ok && !isHashed(result.password)) {
-        const hashed = await hashPassword(password);
-        await db
-          .prepare('UPDATE users SET password = ? WHERE username = ?')
-          .bind(hashed, userName)
-          .run();
-      }
-
-      return ok;
+      return result?.password === password;
     } catch (err) {
       console.error('Failed to verify user:', err);
       throw err;
@@ -337,10 +318,9 @@ export class D1Storage implements IStorage {
   async changePassword(userName: string, newPassword: string): Promise<void> {
     try {
       const db = await this.getDatabase();
-      const hashed = await hashPassword(newPassword);
       await db
         .prepare('UPDATE users SET password = ? WHERE username = ?')
-        .bind(hashed, userName)
+        .bind(newPassword, userName)
         .run();
     } catch (err) {
       console.error('Failed to change password:', err);
@@ -353,11 +333,18 @@ export class D1Storage implements IStorage {
       const db = await this.getDatabase();
       const statements = [
         db.prepare('DELETE FROM users WHERE username = ?').bind(userName),
-        db.prepare('DELETE FROM play_records WHERE username = ?').bind(userName),
+        db
+          .prepare('DELETE FROM play_records WHERE username = ?')
+          .bind(userName),
         db.prepare('DELETE FROM favorites WHERE username = ?').bind(userName),
-        db.prepare('DELETE FROM search_history WHERE username = ?').bind(userName),
-        db.prepare('DELETE FROM skip_configs WHERE username = ?').bind(userName),
+        db
+          .prepare('DELETE FROM search_history WHERE username = ?')
+          .bind(userName),
+        db
+          .prepare('DELETE FROM skip_configs WHERE username = ?')
+          .bind(userName),
       ];
+
       await db.batch(statements);
     } catch (err) {
       console.error('Failed to delete user:', err);
@@ -365,12 +352,14 @@ export class D1Storage implements IStorage {
     }
   }
 
-  // ---------- 搜索历史 ----------
+  // 搜索历史相关
   async getSearchHistory(userName: string): Promise<string[]> {
     try {
       const db = await this.getDatabase();
       const result = await db
-        .prepare('SELECT keyword FROM search_history WHERE username = ? ORDER BY created_at DESC LIMIT ?')
+        .prepare(
+          'SELECT keyword FROM search_history WHERE username = ? ORDER BY created_at DESC LIMIT ?'
+        )
         .bind(userName, SEARCH_HISTORY_LIMIT)
         .all<{ keyword: string }>();
 
@@ -384,10 +373,11 @@ export class D1Storage implements IStorage {
   async addSearchHistory(userName: string, keyword: string): Promise<void> {
     try {
       const db = await this.getDatabase();
-
-      // 删除重复
+      // 先删除可能存在的重复记录
       await db
-        .prepare('DELETE FROM search_history WHERE username = ? AND keyword = ?')
+        .prepare(
+          'DELETE FROM search_history WHERE username = ? AND keyword = ?'
+        )
         .bind(userName, keyword)
         .run();
 
@@ -397,12 +387,18 @@ export class D1Storage implements IStorage {
         .bind(userName, keyword)
         .run();
 
-      // 保持限制
+      // 保持历史记录条数限制
       await db
         .prepare(
-          `DELETE FROM search_history WHERE username = ? AND id NOT IN (
-            SELECT id FROM search_history WHERE username = ? ORDER BY created_at DESC LIMIT ?
-          )`
+          `
+          DELETE FROM search_history 
+          WHERE username = ? AND id NOT IN (
+            SELECT id FROM search_history 
+            WHERE username = ? 
+            ORDER BY created_at DESC 
+            LIMIT ?
+          )
+        `
         )
         .bind(userName, userName, SEARCH_HISTORY_LIMIT)
         .run();
@@ -415,10 +411,11 @@ export class D1Storage implements IStorage {
   async deleteSearchHistory(userName: string, keyword?: string): Promise<void> {
     try {
       const db = await this.getDatabase();
-
       if (keyword) {
         await db
-          .prepare('DELETE FROM search_history WHERE username = ? AND keyword = ?')
+          .prepare(
+            'DELETE FROM search_history WHERE username = ? AND keyword = ?'
+          )
           .bind(userName, keyword)
           .run();
       } else {
@@ -433,7 +430,7 @@ export class D1Storage implements IStorage {
     }
   }
 
-  // ---------- 用户列表 ----------
+  // 用户列表
   async getAllUsers(): Promise<string[]> {
     try {
       const db = await this.getDatabase();
@@ -448,7 +445,7 @@ export class D1Storage implements IStorage {
     }
   }
 
-  // ---------- 管理员配置 ----------
+  // 管理员配置相关
   async getAdminConfig(): Promise<AdminConfig | null> {
     try {
       const db = await this.getDatabase();
@@ -469,7 +466,9 @@ export class D1Storage implements IStorage {
     try {
       const db = await this.getDatabase();
       await db
-        .prepare('INSERT OR REPLACE INTO admin_config (id, config) VALUES (1, ?)')
+        .prepare(
+          'INSERT OR REPLACE INTO admin_config (id, config) VALUES (1, ?)'
+        )
         .bind(JSON.stringify(config))
         .run();
     } catch (err) {
@@ -478,12 +477,18 @@ export class D1Storage implements IStorage {
     }
   }
 
-  // ---------- 跳过片头片尾 ----------
-  async getSkipConfig(userName: string, source: string, id: string): Promise<SkipConfig | null> {
+  // ---------- 跳过片头片尾配置 ----------
+  async getSkipConfig(
+    userName: string,
+    source: string,
+    id: string
+  ): Promise<SkipConfig | null> {
     try {
       const db = await this.getDatabase();
       const result = await db
-        .prepare('SELECT * FROM skip_configs WHERE username = ? AND source = ? AND id_video = ?')
+        .prepare(
+          'SELECT * FROM skip_configs WHERE username = ? AND source = ? AND id_video = ?'
+        )
         .bind(userName, source, id)
         .first<any>();
 
@@ -500,15 +505,30 @@ export class D1Storage implements IStorage {
     }
   }
 
-  async setSkipConfig(userName: string, source: string, id: string, config: SkipConfig): Promise<void> {
+  async setSkipConfig(
+    userName: string,
+    source: string,
+    id: string,
+    config: SkipConfig
+  ): Promise<void> {
     try {
       const db = await this.getDatabase();
       await db
         .prepare(
-          `INSERT OR REPLACE INTO skip_configs (username, source, id_video, enable, intro_time, outro_time)
-           VALUES (?, ?, ?, ?, ?, ?)`
+          `
+          INSERT OR REPLACE INTO skip_configs 
+          (username, source, id_video, enable, intro_time, outro_time)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `
         )
-        .bind(userName, source, id, config.enable ? 1 : 0, config.intro_time, config.outro_time)
+        .bind(
+          userName,
+          source,
+          id,
+          config.enable ? 1 : 0,
+          config.intro_time,
+          config.outro_time
+        )
         .run();
     } catch (err) {
       console.error('Failed to set skip config:', err);
@@ -516,11 +536,17 @@ export class D1Storage implements IStorage {
     }
   }
 
-  async deleteSkipConfig(userName: string, source: string, id: string): Promise<void> {
+  async deleteSkipConfig(
+    userName: string,
+    source: string,
+    id: string
+  ): Promise<void> {
     try {
       const db = await this.getDatabase();
       await db
-        .prepare('DELETE FROM skip_configs WHERE username = ? AND source = ? AND id_video = ?')
+        .prepare(
+          'DELETE FROM skip_configs WHERE username = ? AND source = ? AND id_video = ?'
+        )
         .bind(userName, source, id)
         .run();
     } catch (err) {
@@ -529,15 +555,20 @@ export class D1Storage implements IStorage {
     }
   }
 
-  async getAllSkipConfigs(userName: string): Promise<{ [key: string]: SkipConfig }> {
+  async getAllSkipConfigs(
+    userName: string
+  ): Promise<{ [key: string]: SkipConfig }> {
     try {
       const db = await this.getDatabase();
       const result = await db
-        .prepare('SELECT source, id_video, enable, intro_time, outro_time FROM skip_configs WHERE username = ?')
+        .prepare(
+          'SELECT source, id_video, enable, intro_time, outro_time FROM skip_configs WHERE username = ?'
+        )
         .bind(userName)
         .all<any>();
 
       const configs: { [key: string]: SkipConfig } = {};
+
       result.results.forEach((row) => {
         const key = `${row.source}+${row.id_video}`;
         configs[key] = {
@@ -550,38 +581,6 @@ export class D1Storage implements IStorage {
       return configs;
     } catch (err) {
       console.error('Failed to get all skip configs:', err);
-      throw err;
-    }
-  }
-
-  // ---------- 数据清理 ----------
-  async clearAllData(): Promise<void> {
-    try {
-      const db = await this.getDatabase();
-      
-      // 获取所有用户
-      const users = await this.getAllUsers();
-      
-      // 使用 batch 事务删除所有用户数据和管理员配置
-      const statements: D1PreparedStatement[] = [];
-      for (const username of users) {
-        statements.push(
-          db.prepare('DELETE FROM users WHERE username = ?').bind(username),
-          db.prepare('DELETE FROM play_records WHERE username = ?').bind(username),
-          db.prepare('DELETE FROM favorites WHERE username = ?').bind(username),
-          db.prepare('DELETE FROM search_history WHERE username = ?').bind(username),
-          db.prepare('DELETE FROM skip_configs WHERE username = ?').bind(username),
-        );
-      }
-      // 删除管理员配置
-      statements.push(db.prepare('DELETE FROM admin_config'));
-      
-      // 批量执行，D1 batch 保证原子性
-      await db.batch(statements);
-      
-      console.log('All data cleared');
-    } catch (err) {
-      console.error('Failed to clear all data:', err);
       throw err;
     }
   }

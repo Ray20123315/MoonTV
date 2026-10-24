@@ -55,6 +55,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         error: '获取管理员配置失败',
+        details: (error as Error).message,
       },
       { status: 500 }
     );

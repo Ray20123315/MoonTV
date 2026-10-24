@@ -1,10 +1,10 @@
-﻿/* eslint-disable @typescript-eslint/no-explicit-any,no-console */
+/* eslint-disable @typescript-eslint/no-explicit-any,no-console */
 
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
-import { getConfig, saveConfig } from '@/lib/config';
-import { db } from '@/lib/db';
+import { getConfig } from '@/lib/config';
+import { getStorage } from '@/lib/db';
 
 export const runtime = 'edge';
 
@@ -33,23 +33,17 @@ export async function POST(request: NextRequest) {
       Announcement,
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,
-      DoubanProxyType,
+      ImageProxy,
       DoubanProxy,
-      DoubanImageProxyType,
-      DoubanImageProxy,
       DisableYellowFilter,
-      FluidSearch,
     } = body as {
       SiteName: string;
       Announcement: string;
       SearchDownstreamMaxPage: number;
       SiteInterfaceCacheTime: number;
-      DoubanProxyType: string;
+      ImageProxy: string;
       DoubanProxy: string;
-      DoubanImageProxyType: string;
-      DoubanImageProxy: string;
       DisableYellowFilter: boolean;
-      FluidSearch: boolean;
     };
 
     // 参数校验
@@ -58,17 +52,15 @@ export async function POST(request: NextRequest) {
       typeof Announcement !== 'string' ||
       typeof SearchDownstreamMaxPage !== 'number' ||
       typeof SiteInterfaceCacheTime !== 'number' ||
-      typeof DoubanProxyType !== 'string' ||
+      typeof ImageProxy !== 'string' ||
       typeof DoubanProxy !== 'string' ||
-      typeof DoubanImageProxyType !== 'string' ||
-      typeof DoubanImageProxy !== 'string' ||
-      typeof DisableYellowFilter !== 'boolean' ||
-      typeof FluidSearch !== 'boolean'
+      typeof DisableYellowFilter !== 'boolean'
     ) {
       return NextResponse.json({ error: '参数格式错误' }, { status: 400 });
     }
 
     const adminConfig = await getConfig();
+    const storage = getStorage();
 
     // 权限校验
     if (username !== process.env.USERNAME) {
@@ -87,17 +79,15 @@ export async function POST(request: NextRequest) {
       Announcement,
       SearchDownstreamMaxPage,
       SiteInterfaceCacheTime,
-      DoubanProxyType,
+      ImageProxy,
       DoubanProxy,
-      DoubanImageProxyType,
-      DoubanImageProxy,
       DisableYellowFilter,
-      FluidSearch,
-      EnableWebLive: false,
     };
 
     // 写入数据库
-    await saveConfig(adminConfig);
+    if (storage && typeof (storage as any).setAdminConfig === 'function') {
+      await (storage as any).setAdminConfig(adminConfig);
+    }
 
     return NextResponse.json(
       { ok: true },
@@ -112,6 +102,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         error: '更新站点配置失败',
+        details: (error as Error).message,
       },
       { status: 500 }
     );

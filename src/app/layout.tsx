@@ -4,23 +4,25 @@ import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 
 import './globals.css';
+import 'sweetalert2/dist/sweetalert2.min.css';
 
 import { getConfig } from '@/lib/config';
+import RuntimeConfig from '@/lib/runtime';
 
 import { GlobalErrorIndicator } from '../components/GlobalErrorIndicator';
 import { SiteProvider } from '../components/SiteProvider';
 import { ThemeProvider } from '../components/ThemeProvider';
 
 const inter = Inter({ subsets: ['latin'] });
-export const runtime = 'edge';
-export const dynamic = 'force-dynamic';
 
 // 动态生成 metadata，支持配置更新后的标题变化
 export async function generateMetadata(): Promise<Metadata> {
-  const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
-  const config = await getConfig();
-  let siteName = process.env.NEXT_PUBLIC_SITE_NAME || 'MoonTV';
-  if (storageType !== 'localstorage') {
+  let siteName = process.env.SITE_NAME || 'MoonTV';
+  if (
+    process.env.NEXT_PUBLIC_STORAGE_TYPE !== 'd1' &&
+    process.env.NEXT_PUBLIC_STORAGE_TYPE !== 'upstash'
+  ) {
+    const config = await getConfig();
     siteName = config.SiteConfig.SiteName;
   }
 
@@ -32,6 +34,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export const viewport: Viewport = {
+  themeColor: '#000000',
   viewportFit: 'cover',
 };
 
@@ -40,36 +43,31 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
-
-  let siteName = process.env.NEXT_PUBLIC_SITE_NAME || 'MoonTV';
+  let siteName = process.env.SITE_NAME || 'MoonTV';
   let announcement =
     process.env.ANNOUNCEMENT ||
     '本网站仅提供影视信息搜索服务，所有内容均来自第三方网站。本站不存储任何视频资源，不对任何内容的准确性、合法性、完整性负责。';
-
-  let doubanProxyType = process.env.NEXT_PUBLIC_DOUBAN_PROXY_TYPE || 'cmliussss-cdn-tencent';
+  let enableRegister = process.env.NEXT_PUBLIC_ENABLE_REGISTER === 'true';
+  let imageProxy = process.env.NEXT_PUBLIC_IMAGE_PROXY || '';
   let doubanProxy = process.env.NEXT_PUBLIC_DOUBAN_PROXY || '';
-  let doubanImageProxyType =
-    process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE || 'cmliussss-cdn-tencent';
-  let doubanImageProxy = process.env.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY || '';
   let disableYellowFilter =
     process.env.NEXT_PUBLIC_DISABLE_YELLOW_FILTER === 'true';
-  let fluidSearch = process.env.NEXT_PUBLIC_FLUID_SEARCH !== 'false';
-  let enableWebLive = false;
-  let customCategories = [] as {
-    name: string;
-    type: 'movie' | 'tv';
-    query: string;
-  }[];
-  if (storageType !== 'localstorage') {
+  let customCategories =
+    (RuntimeConfig as any).custom_category?.map((category: any) => ({
+      name: 'name' in category ? category.name : '',
+      type: category.type,
+      query: category.query,
+    })) || ([] as Array<{ name: string; type: 'movie' | 'tv'; query: string }>);
+  if (
+    process.env.NEXT_PUBLIC_STORAGE_TYPE !== 'd1' &&
+    process.env.NEXT_PUBLIC_STORAGE_TYPE !== 'upstash'
+  ) {
     const config = await getConfig();
     siteName = config.SiteConfig.SiteName;
     announcement = config.SiteConfig.Announcement;
-
-    doubanProxyType = config.SiteConfig.DoubanProxyType;
+    enableRegister = config.UserConfig.AllowRegister;
+    imageProxy = config.SiteConfig.ImageProxy;
     doubanProxy = config.SiteConfig.DoubanProxy;
-    doubanImageProxyType = config.SiteConfig.DoubanImageProxyType;
-    doubanImageProxy = config.SiteConfig.DoubanImageProxy;
     disableYellowFilter = config.SiteConfig.DisableYellowFilter;
     customCategories = config.CustomCategories.filter(
       (category) => !category.disabled
@@ -78,21 +76,16 @@ export default async function RootLayout({
       type: category.type,
       query: category.query,
     }));
-    fluidSearch = config.SiteConfig.FluidSearch;
-    enableWebLive = config.SiteConfig.EnableWebLive ?? false;
   }
 
   // 将运行时配置注入到全局 window 对象，供客户端在运行时读取
   const runtimeConfig = {
     STORAGE_TYPE: process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage',
-    DOUBAN_PROXY_TYPE: doubanProxyType,
+    ENABLE_REGISTER: enableRegister,
+    IMAGE_PROXY: imageProxy,
     DOUBAN_PROXY: doubanProxy,
-    DOUBAN_IMAGE_PROXY_TYPE: doubanImageProxyType,
-    DOUBAN_IMAGE_PROXY: doubanImageProxy,
     DISABLE_YELLOW_FILTER: disableYellowFilter,
     CUSTOM_CATEGORIES: customCategories,
-    FLUID_SEARCH: fluidSearch,
-    ENABLE_WEB_LIVE: enableWebLive,
   };
 
   return (
@@ -107,11 +100,7 @@ export default async function RootLayout({
         {/* eslint-disable-next-line @next/next/no-sync-scripts */}
         <script
           dangerouslySetInnerHTML={{
-            // 转义 < 与分隔符，避免站点名/公告等配置内容中的 </script> 提前闭合脚本标签
-            __html: `window.RUNTIME_CONFIG = ${JSON.stringify(runtimeConfig)
-              .replace(/</g, '\\u003c')
-              .replace(/\u2028/g, '\\u2028')
-              .replace(/\u2029/g, '\\u2029')};`,
+            __html: `window.RUNTIME_CONFIG = ${JSON.stringify(runtimeConfig)};`,
           }}
         />
       </head>
